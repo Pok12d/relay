@@ -1,1 +1,17 @@
+{
+  "name": "relay-server",
+  "version": "1.0.0",
+  "description": "ExitGames WSS relay",
+  "main": "relay-server.js",
+  "scripts": {
+    "start": "node relay-server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
 
