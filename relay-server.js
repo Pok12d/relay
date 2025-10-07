@@ -91,4 +91,6 @@ wss.on("connection", (clientWs, req) => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => console.log(`[relay DEBUG] Listening on port ${PORT}`));
+const HOST = "0.0.0.0"; // Bind to all interfaces for Render
+server.listen(PORT, HOST, () => console.log(`[relay DEBUG] Listening on ${HOST}:${PORT}`));
+
