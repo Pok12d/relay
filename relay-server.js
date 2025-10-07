@@ -1,23 +1,22 @@
-// relay-server-debug.js
+// relay-server.js
 import express from "express";
 import http from "http";
-import { WebSocketServer } from "ws";
-import { URL } from "url";
+import { WebSocketServer, WebSocket } from "ws";
 
 const app = express();
-app.get("/", (req,res) => res.send("Relay server alive (debug)"));
+app.get("/", (req, res) => res.send("Relay server alive"));
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: "/intercept" });
 
-// Map of browser ws -> connId -> serverWs
+// Map: browserWS -> connId -> serverWS
 const browserMaps = new Map();
 
-wss.on("connection", (clientWs, req) => {
+wss.on("connection", (browserWs, req) => {
   console.log("[relay] Browser connected:", req.socket.remoteAddress);
-  browserMaps.set(clientWs, new Map());
+  browserMaps.set(browserWs, new Map());
 
-  clientWs.on("message", async (data) => {
+  browserWs.on("message", async (data) => {
     let msg;
     try { msg = JSON.parse(data.toString()); } catch (e) {
       console.warn("[relay] Invalid JSON from browser:", e);
@@ -26,71 +25,71 @@ wss.on("connection", (clientWs, req) => {
 
     const { type, connId, target, protocols, isBinary, payload, code, reason } = msg;
 
+    // Ignore messages without connId except 'open'
     if (!connId && type !== "open") return;
 
     if (type === "open") {
-      console.log(`[relay DEBUG] Browser wants to open URL: ${target} (connId: ${connId})`);
-
-      // Send debug back to browser console
-      clientWs.send(JSON.stringify({
-        type: "debug",
-        connId,
-        message: `[relay debug] Received URL: ${target}`
-      }));
-
-      // Optional: actually open server WebSocket (still proxies)
-      const WebSocket = (await import("ws")).WebSocket;
+      console.log(`[relay] Browser wants to open: ${target} (connId: ${connId})`);
+      
+      // Open real WebSocket to ExitGames
       const serverWs = new WebSocket(target, protocols || []);
-      browserMaps.get(clientWs).set(connId, serverWs);
+      browserMaps.get(browserWs).set(connId, serverWs);
 
-      serverWs.on("open", () => clientWs.send(JSON.stringify({ type: "open", connId })));
+      // Forward open
+      serverWs.on("open", () => {
+        console.log(`[relay] Connected to target: ${target}`);
+        browserWs.send(JSON.stringify({ type: "open", connId }));
+      });
+
+      // Forward messages both ways
       serverWs.on("message", (msgData, isBinaryFrm) => {
         if (isBinaryFrm) {
-          clientWs.send(JSON.stringify({ type: "message", connId, isBinary: true, payload: Buffer.from(msgData).toString("base64") }));
+          browserWs.send(JSON.stringify({ type: "message", connId, isBinary: true, payload: Buffer.from(msgData).toString("base64") }));
         } else {
-          clientWs.send(JSON.stringify({ type: "message", connId, isBinary: false, payload: msgData.toString() }));
+          browserWs.send(JSON.stringify({ type: "message", connId, isBinary: false, payload: msgData.toString() }));
         }
       });
+
+      // Forward close
       serverWs.on("close", (c,r) => {
-        clientWs.send(JSON.stringify({ type: "close", connId, code: c, reason: r }));
-        browserMaps.get(clientWs).delete(connId);
+        browserWs.send(JSON.stringify({ type: "close", connId, code: c, reason: r }));
+        browserMaps.get(browserWs).delete(connId);
       });
+
+      // Forward error
       serverWs.on("error", (err) => {
-        clientWs.send(JSON.stringify({ type: "error", connId, message: String(err) }));
+        browserWs.send(JSON.stringify({ type: "error", connId, message: String(err) }));
         console.error("[relay] Server WS error:", err);
       });
 
     } else if (type === "send") {
-      const m = browserMaps.get(clientWs);
+      const m = browserMaps.get(browserWs);
       if (!m) return;
       const serverWs = m.get(connId);
       if (!serverWs) return;
-      if (isBinary) {
-        serverWs.send(Buffer.from(payload, "base64"), { binary: true });
-      } else {
-        serverWs.send(payload);
-      }
+
+      if (isBinary) serverWs.send(Buffer.from(payload, "base64"), { binary: true });
+      else serverWs.send(payload);
+
     } else if (type === "close") {
-      const m = browserMaps.get(clientWs);
+      const m = browserMaps.get(browserWs);
       if (!m) return;
       const serverWs = m.get(connId);
       if (serverWs && serverWs.readyState !== serverWs.CLOSED) serverWs.close(code || 1000, reason || "client requested close");
-      clientWs.send(JSON.stringify({ type: "close", connId, code: code || 1000, reason: reason || "closed" }));
       m.delete(connId);
+      browserWs.send(JSON.stringify({ type: "close", connId, code: code || 1000, reason: reason || "closed" }));
     }
   });
 
-  clientWs.on("close", () => {
+  browserWs.on("close", () => {
     console.log("[relay] Browser disconnected");
-    const m = browserMaps.get(clientWs);
+    const m = browserMaps.get(browserWs);
     if (m) for (const [, serverWs] of m) try { serverWs.close(); } catch(e){}
-    browserMaps.delete(clientWs);
+    browserMaps.delete(browserWs);
   });
 
-  clientWs.on("error", (err) => console.error("[relay] Browser socket error:", err));
+  browserWs.on("error", (err) => console.error("[relay] Browser WS error:", err));
 });
 
 const PORT = process.env.PORT || 8080;
-const HOST = "0.0.0.0"; // Bind to all interfaces for Render
-server.listen(PORT, HOST, () => console.log(`[relay DEBUG] Listening on ${HOST}:${PORT}`));
-
+server.listen(PORT, () => console.log(`[relay] Listening on port ${PORT}`));
