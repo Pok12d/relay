@@ -1,5 +1,4 @@
 // relay-server-debug.js
-// Debug version: logs every requested URL from the browser
 import express from "express";
 import http from "http";
 import { WebSocketServer } from "ws";
@@ -32,10 +31,14 @@ wss.on("connection", (clientWs, req) => {
     if (type === "open") {
       console.log(`[relay DEBUG] Browser wants to open URL: ${target} (connId: ${connId})`);
 
-      // send debug back to browser
-      clientWs.send(JSON.stringify({ type: "debug", connId, message: `Received URL: ${target}` }));
+      // Send debug back to browser console
+      clientWs.send(JSON.stringify({
+        type: "debug",
+        connId,
+        message: `[relay debug] Received URL: ${target}`
+      }));
 
-      // create server ws only if you want to actually proxy
+      // Optional: actually open server WebSocket (still proxies)
       const WebSocket = (await import("ws")).WebSocket;
       const serverWs = new WebSocket(target, protocols || []);
       browserMaps.get(clientWs).set(connId, serverWs);
